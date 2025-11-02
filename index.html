@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KaaryaSetu - Bridging Citizens & Government with AI</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Load Lucide Icons for aesthetic UI elements -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .card { transition: all 0.3s ease; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
+        
+        /* Status Badges */
+        .badge-reported { background-color: #fef3c7; color: #b45309; border: 1px solid #d97706; padding: 2px 8px; border-radius: 9999px; }
+        .badge-assigned { background-color: #dbeafe; color: #1e40af; border: 1px solid #2563eb; padding: 2px 8px; border-radius: 9999px; }
+        .badge-fixed { background-color: #d1fae5; color: #065f46; border: 1px solid #059669; padding: 2px 8px; border-radius: 9999px; }
+        
+        /* Priority Badges */
+        .priority-high { background-color: #fee2e2; color: #b91c1c; font-weight: 700; border-radius: 9999px; padding: 2px 8px; }
+        .priority-medium { background-color: #fffbeb; color: #92400e; border-radius: 9999px; padding: 2px 8px; }
+        .priority-low { background-color: #eff6ff; color: #1d4ed8; border-radius: 9999px; padding: 2px 8px; }
+        
+        .loader { border-top-color: #3498db; -webkit-animation: spin 1s linear infinite; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        /* Custom audio player styling */
+        #audio-player-container audio {
+            width: 100%;
+            max-width: 400px;
+            margin-top: 1rem;
+            border-radius: 9999px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="max-w-7xl mx-auto">
+        <header class="mb-8 p-4 bg-white rounded-xl shadow-lg border-t-4 border-indigo-600">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
+                <h1 class="text-3xl font-bold text-gray-800">KaaryaSetu <span class="text-indigo-600 font-normal text-xl">Civic AI Bridge</span></h1>
+                <div id="auth-status" class="mt-3 md:mt-0 text-sm text-gray-600 flex items-center">
+                    <span id="user-info" class="font-medium mr-2">Loading user...</span>
+                    <button onclick="lucide.createIcons();" class="text-indigo-500 hover:text-indigo-700 transition duration-150" title="Refresh Icons"><i data-lucide="refresh-cw" class="w-4 h-4 inline"></i></button>
+                </div>
+            </div>
+            <div id="user-dashboard" class="mt-4 p-3 bg-gray-50 rounded-lg flex items-center justify-between text-sm shadow-inner">
+                <p class="text-gray-700 font-semibold">Your Public ID: <span id="user-id-display" class="text-indigo-700 font-mono text-xs p-1 bg-indigo-100 rounded-md ring-1 ring-indigo-300"></span></p>
+                <div class="flex items-center space-x-6">
+                    <span class="text-gray-700 font-bold text-base flex items-center p-1 bg-yellow-50 rounded-lg">
+                        <i data-lucide="award" class="w-5 h-5 inline text-yellow-600 mr-2"></i> Points: <span id="points-display" class="text-yellow-700 ml-1">0</span>
+                    </span>
+                    <span class="text-gray-700 font-bold text-base flex items-center p-1 bg-green-50 rounded-lg">
+                        <i data-lucide="badge-check" class="w-5 h-5 inline text-green-600 mr-2"></i> Badges: <span id="badges-display" class="text-green-700 ml-1">0</span>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 1. Citizen Reporting Form -->
+            <section class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border">
+                <h2 class="text-2xl font-semibold mb-6 text-gray-700 flex items-center">
+                    <i data-lucide="megaphone" class="w-6 h-6 mr-2 text-red-500"></i> Report a Civic Issue
+                </h2>
+                <form id="report-form" onsubmit="reportIssue(event)">
+                    
+                    <div class="mb-4">
+                        <label for="issue-image" class="block text-sm font-medium text-gray-700 mb-1">Photo Evidence (Image of the problem):</label>
+                        <input type="file" id="issue-image" accept="image/*" class="w-full text-sm text-gray-500
+                            file:mr-4 file:py-2 file:px-4
+                            file:rounded-full file:border-0
+                            file:text-sm file:font-semibold
+                            file:bg-indigo-50 file:text-indigo-700
+                            hover:file:bg-indigo-100" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="issue-description" class="block text-sm font-medium text-gray-700 mb-1">Description (What is the problem?)</label>
+                        <textarea id="issue-description" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" placeholder="e.g., There is a large pothole at the intersection of Main St and 5th Ave." required></textarea>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="issue-location" class="block text-sm font-medium text-gray-700 mb-1">Location (Simulated GPS/Address):</label>
+                        <input type="text" id="issue-location" value="123 Civic Center Drive, Sector 4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" placeholder="e.g., Near City Hall" required>
+                    </div>
+
+                    <div class="flex items-center justify-between">
+                        <button type="submit" id="submit-button" class="flex items-center justify-center w-full px-4 py-3 border border-transparent text-sm font-medium rounded-xl shadow-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150">
+                            <span id="submit-text">Report Issue & Run AI Analysis</span>
+                            <div id="loading-indicator" class="loader w-4 h-4 border-2 border-white border-solid rounded-full hidden ml-2"></div>
+                        </button>
+                    </div>
+                </form>
+
+                <div id="message-box" class="mt-4 p-3 rounded-lg text-sm hidden"></div>
+            </section>
+
+            <!-- 2. Government Dashboard (Live Reports) -->
+            <section class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border">
+                <h2 class="text-2xl font-semibold mb-6 text-gray-700 flex items-center">
+                    <i data-lucide="layout-dashboard" class="w-6 h-6 mr-2 text-teal-600"></i> Live Government Dashboard
+                </h2>
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <p class="text-sm font-medium text-gray-500">Total Reports: <span id="report-count" class="font-bold text-gray-700">0</span></p>
+                    <p class="text-xs text-gray-500">Updates in real-time via Firestore</p>
+                </div>
+                
+                <div id="reports-list" class="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                    <p id="empty-state" class="text-gray-500 text-center p-8 hidden">No reports submitted yet. Be the first!</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- AI Response Modal (Handles Solutions and Official Response) -->
+    <div id="ai-response-modal" class="modal-overlay hidden" onclick="closeResponseModal(event)">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-11/12 max-w-3xl" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-start border-b pb-3 mb-4">
+                <h3 id="modal-title" class="text-xl font-bold text-indigo-700 flex items-center">
+                    <!-- Title updated by JS -->
+                </h3>
+                <button class="text-gray-400 hover:text-gray-600" onclick="closeResponseModal()">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            
+            <div id="modal-content" class="text-gray-700 min-h-20 max-h-[70vh] overflow-y-auto pr-2">
+                <!-- Content will be loaded here -->
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeResponseModal()" class="px-4 py-2 bg-indigo-500 text-white font-medium rounded-lg hover:bg-indigo-600 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Imports and All Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, setLogLevel, increment, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-kaaryasetu-app';
+        const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Synchronization flags
+        let isDomReady = false;
+        let isAuthReady = false;
+        let hasListenersStarted = false;
+
+        // Gemini API configuration
+        const API_KEY = ""; // Automatically provided by canvas
+        const TEXT_GEN_API_URL = https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY};
+        const TTS_API_URL = https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${API_KEY};
+        const MAX_RETRIES = 5;
+        const POINTS_PER_REPORT = 10; 
+
+        // Storage for reports to access them easily when generating solutions
+        let globalReports = {};
+        
+        // --- AUDIO UTILITIES (Mandatory for TTS) ---
+
+        // Converts Base64 string to ArrayBuffer
+        function base64ToArrayBuffer(base64) {
+            const binary_string = window.atob(base64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Converts PCM 16-bit audio data (from API) into a WAV Blob
+        function pcmToWav(pcm16, sampleRate) {
+            const pcmData = pcm16.buffer;
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const blockAlign = numChannels * (bitsPerSample / 8);
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = pcmData.byteLength;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            let offset = 0;
+
+            // Write RIFF header
+            function writeString(s) {
+                for (let i = 0; i < s.length; i++) {
+                    view.setUint8(offset++, s.charCodeAt(i));
+                }
+            }
+            
+            // ChunkID (RIFF)
+            writeString('RIFF'); 
+            offset += 4; // ChunkSize (will fill later)
+
+            // Format (WAVE)
+            writeString('WAVE'); 
+
+            // Subchunk1ID (fmt )
+            writeString('fmt '); 
+            view.setUint32(offset, 16, true); offset += 4; // Subchunk1Size (16 for PCM)
+            view.setUint16(offset, 1, true); offset += 2; // AudioFormat (1 for PCM)
+            view.setUint16(offset, numChannels, true); offset += 2; // NumChannels
+            view.setUint32(offset, sampleRate, true); offset += 4; // SampleRate
+            view.setUint32(offset, byteRate, true); offset += 4; // ByteRate
+            view.setUint16(offset, blockAlign, true); offset += 2; // BlockAlign
+            view.setUint16(offset, bitsPerSample, true); offset += 2; // BitsPerSample
+
+            // Subchunk2ID (data)
+            writeString('data'); 
+            view.setUint32(offset, dataSize, true); offset += 4; // Subchunk2Size
+
+            // Write PCM data
+            const pcmBytes = new Uint8Array(pcmData);
+            for (let i = 0; i < dataSize; i++) {
+                view.setUint8(offset++, pcmBytes[i]);
+            }
+
+            // Go back and fill in the two sizes
+            view.setUint32(4, 36 + dataSize, true); // RIFF ChunkSize
+            view.setUint32(40, dataSize, true); // data Subchunk2Size
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+        
+        // --- NEW LLM & TTS FUNCTIONS ---
+
+        // 1. TEXT GENERATION: Drafts an official response
+        async function getAIDraftResponse(report) {
+            const systemPrompt = You are a polite and professional City Council Communications Officer. Your task is to draft a reassuring and comprehensive response to a citizen's civic report. Acknowledge the issue, confirm the priority, and describe the action the city will take based on the predicted category and urgency. Keep the tone formal but caring. Start with a direct salutation, e.g., "Dear Citizen,".;
+
+            const userQuery = `Draft an official response for the following issue:
+            Category: ${report.category}
+            Urgency: ${report.urgency}
+            Location: ${report.location}
+            Citizen Description: ${report.description}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            console.log("Sending payload to Gemini API for response drafting...");
+
+            try {
+                const response = await fetchWithBackoff(TEXT_GEN_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!generatedText) {
+                    throw new Error("AI response draft was empty.");
+                }
+
+                return generatedText;
+
+            } catch (error) {
+                console.error("AI Response Drafting Failed:", error);
+                throw new Error("Failed to draft response from AI.");
+            }
+        }
+
+        // 2. TTS GENERATION: Converts text to audio
+        async function getTTSAudio(text) {
+            // Use the "Kore" voice for an official, firm tone
+            const payload = {
+                contents: [{ parts: [{ text: text }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: "Kore" }
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            console.log("Sending payload to Gemini TTS API...");
+
+            try {
+                const response = await fetchWithBackoff(TTS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (!audioData || !mimeType || !mimeType.startsWith("audio/")) {
+                    throw new Error("Invalid TTS audio response.");
+                }
+                
+                // Extract sample rate from mimeType, e.g., audio/L16;rate=24000
+                const rateMatch = mimeType.match(/rate=(\d+)/);
+                const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                
+                // Convert Base64 PCM to ArrayBuffer, then to Int16Array
+                const pcmData = base64ToArrayBuffer(audioData);
+                const pcm16 = new Int16Array(pcmData);
+
+                // Convert PCM to WAV Blob
+                const wavBlob = pcmToWav(pcm16, sampleRate);
+                const audioUrl = URL.createObjectURL(wavBlob);
+
+                return audioUrl;
+
+            } catch (error) {
+                console.error("TTS Generation Failed:", error);
+                throw new Error("Failed to generate audio.");
+            }
+        }
+
+        // 3. AI SOLUTIONS (Existing Feature)
+        async function getAISolutions(report) {
+            const systemPrompt = `You are a Municipal Infrastructure Planning Consultant. Your task is to analyze a reported civic issue and provide a structured action plan.
+            The response MUST contain three distinct sections with titles: *Immediate Steps, **Medium-Term Fixes, and **Long-Term Prevention*.
+            Format your output strictly as concise Markdown text using bullet points for clarity. Do not include any conversational text or introduction.`;
+
+            const userQuery = `Issue Category: ${report.category}
+            Urgency: ${report.urgency}
+            Location: ${report.location}
+            Citizen Description: ${report.description}
+            
+            Generate the structured action plan.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            try {
+                const response = await fetchWithBackoff(TEXT_GEN_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!generatedText) { throw new Error("AI solution response was empty."); }
+                return generatedText;
+            } catch (error) {
+                console.error("AI Solution Generation Failed:", error);
+                throw new Error("Failed to get solution plan from AI.");
+            }
+        }
+
+
+        // --- MODAL & UI FUNCTIONS ---
+
+        // Helper function to render markdown
+        function renderMarkdown(markdownText) {
+            // Simple markdown rendering for common list/bold items
+            let html = markdownText
+                .replace(/\\(.?)\\*/g, '<strong>$1</strong>') // Bold
+                .replace(/^(.*?)\n/gm, (match) => { // List items
+                    if (match.trim().match(/^(\*|\-|\d+\.)\s/)) {
+                        return <li class="ml-4 list-disc text-sm">${match.trim().replace(/^(\*|\-|\d+\.)\s/, '')}</li>;
+                    }
+                    if (match.trim().endsWith(':')) {
+                         return <p class="font-semibold text-gray-800 mt-3 mb-1 text-base">${match.trim()}</p>;
+                    }
+                    return <p class="mb-1 text-sm">${match.trim().replace(/\n/g, '<br>')}</p>;
+                });
+            return <div class="space-y-1">${html}</div>;
+        }
+
+        window.closeResponseModal = function(event) {
+            const modal = document.getElementById('ai-response-modal');
+            const audioPlayerContainer = document.getElementById('audio-player-container');
+            if (modal) {
+                modal.classList.add('hidden');
+                // Clean up content and stop audio
+                document.getElementById('modal-content').innerHTML = '';
+                if (audioPlayerContainer) audioPlayerContainer.innerHTML = '';
+            }
+        }
+
+        window.showResponseModal = async function(reportId, mode) {
+            const report = globalReports[reportId];
+            if (!report) { showMessage("Error: Could not find report data.", 'error'); return; }
+
+            const modal = document.getElementById('ai-response-modal');
+            const title = document.getElementById('modal-title');
+            const content = document.getElementById('modal-content');
+            
+            modal.classList.remove('hidden');
+
+            // Set loading state
+            title.innerHTML = <i data-lucide="zap" class="w-6 h-6 mr-2"></i> Generating AI ${mode}...;
+            content.innerHTML = `
+                <div class="flex flex-col items-center justify-center p-8">
+                    <div class="loader w-8 h-8 border-4 border-indigo-200 rounded-full mb-3"></div>
+                    <p class="text-indigo-600 font-medium">Processing request for ${report.category}...</p>
+                    <p class="text-xs text-gray-500 mt-1">This may take a moment.</p>
+                </div>
+            `;
+            lucide.createIcons(); 
+
+            try {
+                if (mode === 'solutions') {
+                    title.innerHTML = <i data-lucide="lightbulb" class="w-6 h-6 mr-2"></i> AI Suggested Solutions;
+                    const solutionsMarkdown = await getAISolutions(report);
+                    content.innerHTML = renderMarkdown(solutionsMarkdown);
+
+                } else if (mode === 'response') {
+                    title.innerHTML = <i data-lucide="volume-2" class="w-6 h-6 mr-2"></i> Official AI Response Draft;
+                    
+                    // 1. Generate Text Draft
+                    const draftText = await getAIDraftResponse(report);
+                    content.innerHTML = <p class="font-semibold text-base mb-3 border-b pb-2">Text Draft:</p>;
+                    content.innerHTML += <div class="p-4 bg-gray-50 border rounded-lg whitespace-pre-wrap">${draftText}</div>;
+                    
+                    // Add Audio Player Container
+                    content.innerHTML += `<div id="audio-player-container" class="mt-6 flex flex-col items-center">
+                        <p class="font-semibold text-base text-indigo-700 mb-2">🔊 Audio Message (TTS):</p>
+                        <p class="text-sm text-gray-500">Generating audio...</p>
+                    </div>`;
+
+                    // 2. Generate and Play Audio
+                    const audioUrl = await getTTSAudio(draftText);
+                    const audioHtml = `
+                        <audio controls autoplay>
+                            <source src="${audioUrl}" type="audio/wav">
+                            Your browser does not support the audio element.
+                        </audio>`;
+                    
+                    // Update the audio container
+                    document.getElementById('audio-player-container').innerHTML = audioHtml;
+                }
+
+            } catch (e) {
+                content.innerHTML = <div class="p-4 bg-red-50 rounded-lg text-red-700">Error: ${e.message}</div>;
+                title.innerHTML = <i data-lucide="alert-triangle" class="w-6 h-6 mr-2"></i> Error;
+            }
+            lucide.createIcons();
+        }
+
+
+        // Helper function to render a report item
+        function reportToHtml(report) {
+            // Store the report globally for modal access
+            globalReports[report.id] = report;
+
+            const timeAgo = new Date(report.timestamp?.seconds * 1000).toLocaleString();
+            const statusClass = 'badge-' + report.status.toLowerCase();
+            const priorityClass = 'priority-' + report.urgency.toLowerCase();
+            const isMyReport = report.userId === window.userId;
+
+            return `
+                <div class="p-4 bg-white rounded-lg border card ${isMyReport ? 'border-indigo-400 ring-2 ring-indigo-400' : 'border-gray-200'}">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider ${statusClass}">${report.status}</span>
+                        <span class="text-xs font-semibold uppercase tracking-wider ${priorityClass}">P: ${report.urgency}</span>
+                    </div>
+                    <div class="flex flex-wrap items-center mb-2 pt-1 border-t border-gray-100 mt-2">
+                        <span class="text-lg font-bold text-gray-800 mr-3">${report.category || 'Unclassified'}</span>
+                        <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 flex items-center">
+                            <i data-lucide="map-pin" class="w-3 h-3 mr-1"></i> ${report.location}
+                        </span>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-3 line-clamp-2">${report.description.substring(0, 150)}${report.description.length > 150 ? '...' : ''}</p>
+                    <div class="flex flex-col md:flex-row md:justify-between items-start md:items-center text-xs text-gray-400">
+                        <span>
+                            Reported by <span class="font-mono text-gray-600">${isMyReport ? 'You' : report.userId.substring(0, 8)}...</span> at ${timeAgo}
+                        </span>
+                        <!-- AI Buttons Group -->
+                        <div class="flex space-x-2 mt-2 md:mt-0">
+                             <button onclick="showResponseModal('${report.id}', 'solutions')" class="flex items-center text-indigo-600 hover:text-indigo-800 transition duration-150 text-sm font-semibold p-1 rounded-lg bg-indigo-50 hover:bg-indigo-100">
+                                 ✨ Solutions
+                            </button>
+                             <button onclick="showResponseModal('${report.id}', 'response')" class="flex items-center text-emerald-600 hover:text-emerald-800 transition duration-150 text-sm font-semibold p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100">
+                                 🔊 Draft Response
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        window.reportToHtml = reportToHtml;
+
+        // --- CORE FIREBASE & UTILITY FUNCTIONS (REMAINS THE SAME) ---
+        
+        function loadUserProfile() {
+            if (!window.db || !window.userId) return;
+            const profileDocRef = doc(window.db, /artifacts/${window.appId}/users/${window.userId}/profile/data);
+
+            onSnapshot(profileDocRef, (docSnap) => {
+                const pointsDisplay = document.getElementById('points-display');
+                const badgesDisplay = document.getElementById('badges-display');
+                const profile = docSnap.exists() ? docSnap.data() : { points: 0, badges: [] };
+                if (pointsDisplay) pointsDisplay.textContent = profile.points || 0;
+                if (badgesDisplay) badgesDisplay.textContent = profile.badges?.length || 0;
+            }, (error) => {
+                console.error("Error listening to user profile:", error);
+            });
+        }
+        
+        async function awardPoints(pointsToAdd) {
+            if (!window.db || !window.userId) return;
+            const profileDocRef = doc(window.db, /artifacts/${window.appId}/users/${window.userId}/profile/data);
+            try {
+                await setDoc(profileDocRef, {
+                    points: increment(pointsToAdd),
+                }, { merge: true });
+            } catch (error) {
+                console.error("Failed to award points:", error);
+                showMessage("Warning: Failed to update your points in Firestore.", 'info');
+            }
+        }
+        
+        function loadReports() {
+            if (!window.db) return;
+            const reportsRef = collection(window.db, window.reportsCollectionPath);
+            const q = query(reportsRef); 
+
+            onSnapshot(q, (snapshot) => {
+                const reportsList = document.getElementById('reports-list');
+                const emptyState = document.getElementById('empty-state');
+                const reportCount = document.getElementById('report-count');
+                
+                if (!reportsList || !emptyState || !reportCount) {
+                    // This console error is now safe since we only call loadReports when the DOM is ready
+                    console.error("Dashboard elements not found during snapshot update. Skipping.");
+                    return; 
+                }
+                
+                let reports = [];
+                snapshot.forEach(doc => {
+                    reports.push({ id: doc.id, ...doc.data() });
+                });
+                
+                reports.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+                reportCount.textContent = reports.length;
+                if (reports.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    reportsList.innerHTML = '';
+                } else {
+                    emptyState.classList.add('hidden');
+                    reportsList.innerHTML = reports.map(reportToHtml).join('');
+                    setTimeout(lucide.createIcons, 50); 
+                }
+            }, (error) => {
+                console.error("Error listening to reports:", error);
+                const reportsList = document.getElementById('reports-list');
+                if (reportsList) {
+                    reportsList.innerHTML = <p class="text-red-500">Error loading reports: ${error.message}</p>;
+                }
+            });
+        }
+        window.loadReports = loadReports;
+        
+        function toBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const mimeType = file.type || 'image/jpeg'; 
+                    const base64String = reader.result.split(',')[1];
+                    resolve({ base64: base64String, mimeType: mimeType });
+                };
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function fetchWithBackoff(url, options, retries = 0) {
+            try {
+                const response = await fetch(url, options);
+                if (response.status === 429 && retries < MAX_RETRIES) {
+                    const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+                    console.warn(Rate limit hit. Retrying in ${Math.round(delay / 1000)}s...);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries + 1);
+                }
+                if (!response.ok) {
+                    throw new Error(HTTP error! status: ${response.status});
+                }
+                return response;
+            } catch (error) {
+                if (retries < MAX_RETRIES) {
+                    const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+                    console.error(Fetch attempt failed: ${error.message}. Retrying in ${Math.round(delay / 1000)}s...);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries + 1);
+                }
+                throw new Error(Failed after ${MAX_RETRIES} retries: ${error.message});
+            }
+        }
+
+        function showMessage(text, type = 'info') {
+            const box = document.getElementById('message-box');
+            if (!box) { console.error("Message box element not found."); return; }
+            
+            box.textContent = text;
+            box.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800');
+            if (type === 'success') {
+                box.classList.add('bg-green-100', 'text-green-800');
+            } else if (type === 'error') {
+                box.classList.add('bg-red-100', 'text-red-800');
+            } else {
+                box.classList.add('bg-yellow-100', 'text-yellow-800');
+            }
+            setTimeout(() => { box.classList.add('hidden'); }, 5000);
+        }
+
+        async function analyzeIssueWithAI(base64Image, description, mimeType) {
+            const systemPrompt = `You are the KaaryaSetu AI Classification and Prioritization Engine. Your task is to analyze a citizen's report, consisting of an image and a text description, and classify the issue and determine its urgency.
+            Classification must be one of: "Pothole", "Broken Streetlight", "Overflowing Garbage", "Water Leak", "Damaged Signage", or "Other Infrastructure".
+            Urgency must be one of: "High" (immediate danger/major disruption), "Medium" (needs action soon), or "Low" (routine maintenance).
+            Provide the output STRICTLY as a JSON object with the keys "category" and "urgency". Do not include any other text or explanation.`;
+
+            const userQuery = Analyze the following image and description to classify the civic issue and determine its urgency. Description: "${description}";
+
+            const payload = {
+                contents: [
+                    { role: "user", parts: [ { text: userQuery }, { inlineData: { mimeType: mimeType, data: base64Image } } ] }
+                ],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "category": { "type": "STRING", "description": "The classified type of civic issue." },
+                            "urgency": { "type": "STRING", "description": "The predicted urgency of the issue (High, Medium, or Low)." }
+                        },
+                        "propertyOrdering": ["category", "urgency"]
+                    }
+                }
+            };
+
+            try {
+                const response = await fetchWithBackoff(TEXT_GEN_API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const result = await response.json();
+                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!jsonText) { throw new Error("AI response was empty or malformed."); }
+                const aiAnalysis = JSON.parse(jsonText);
+                return { category: aiAnalysis.category || "Unclassified", urgency: aiAnalysis.urgency || "Medium" };
+            } catch (error) {
+                console.error("AI Analysis Failed:", error);
+                showMessage("AI classification failed. Using default values.", 'error');
+                return { category: "Other Infrastructure", urgency: "Medium" };
+            }
+        }
+
+        async function reportIssue(event) {
+            event.preventDefault();
+
+            const submitButton = document.getElementById('submit-button');
+            const submitText = document.getElementById('submit-text');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const imageInput = document.getElementById('issue-image');
+            const description = document.getElementById('issue-description').value.trim();
+            const location = document.getElementById('issue-location').value.trim();
+
+            if (!window.db || !window.userId) { showMessage("System is still loading or Firebase is unconfigured. Please wait.", 'error'); return; }
+            if (imageInput.files.length === 0) { showMessage("Please upload a photo of the civic issue.", 'error'); return; }
+
+            submitButton.disabled = true;
+            submitText.textContent = 'Analyzing and Submitting...';
+            loadingIndicator.classList.remove('hidden');
+            showMessage("1/2: Uploading image and analyzing with AI...", 'info');
+
+            try {
+                const file = imageInput.files[0];
+                const { base64, mimeType } = await toBase64(file);
+                const { category, urgency } = await analyzeIssueWithAI(base64, description, mimeType);
+                showMessage(2/2: AI classified issue as "${category}" with Priority "${urgency}". Saving report to Firestore..., 'info');
+
+                const reportsRef = collection(window.db, window.reportsCollectionPath);
+                const newReport = { userId: window.userId, description: description, location: location, category: category, urgency: urgency, status: 'Reported', timestamp: new Date() };
+
+                await addDoc(reportsRef, newReport);
+                await awardPoints(POINTS_PER_REPORT);
+
+                showMessage(Success! Your issue has been reported and you earned +${POINTS_PER_REPORT} points!, 'success');
+                document.getElementById('report-form').reset();
+                
+            } catch (error) {
+                console.error("Submission failed:", error);
+                showMessage("Critical Error during submission: " + error.message, 'error');
+            } finally {
+                submitButton.disabled = false;
+                submitText.textContent = 'Report Issue & Run AI Analysis';
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+        window.reportIssue = reportIssue;
+
+        function startDataListeners() {
+            if (isDomReady && isAuthReady && !hasListenersStarted) {
+                hasListenersStarted = true;
+                console.log("Starting Firestore Data Listeners: DOM and Auth are ready.");
+                loadReports();
+                loadUserProfile(); 
+            }
+        }
+
+        function initFirebaseApp() {
+            if (!firebaseConfig) {
+                console.error("Firebase configuration is missing.");
+                document.getElementById('auth-status').innerHTML = '<span class="text-red-600">ERROR: Firebase Config Missing.</span>';
+                window.db = null; window.auth = null; window.userId = 'unauthenticated-user'; window.appId = appId;
+                document.getElementById('report-form').onsubmit = (e) => { e.preventDefault(); showMessage("Firebase is not configured. Cannot submit reports.", 'error'); };
+                return; 
+            }
+
+            setLogLevel('Debug');
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+            
+            window.db = db;
+            window.auth = auth;
+            window.appId = appId;
+            window.reportsCollectionPath = /artifacts/${appId}/public/data/reports;
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    window.userId = user.uid;
+                    document.getElementById('user-info').textContent = 'Authenticated';
+                    document.getElementById('user-id-display').textContent = user.uid;
+                    isAuthReady = true;
+                    startDataListeners();
+                } else {
+                    window.userId = 'guest-' + crypto.randomUUID().substring(0, 8);
+                    document.getElementById('user-info').textContent = 'Signing in anonymously...';
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Authentication failed:", error);
+                        document.getElementById('user-info').textContent = 'Auth Failed';
+                        isAuthReady = true;
+                        startDataListeners();
+                    }
+                }
+            });
+        }
+
+        initFirebaseApp();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons(); 
+            isDomReady = true;
+            startDataListeners();
+        });
+
+    </script>
+</body>
+</html>

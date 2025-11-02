@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KaaryaSetu - Government Dashboard</title>
+    <!-- 1. Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. Load Google Font (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 3. Firebase SDKs -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            onAuthStateChanged, 
+            signInAnonymously, 
+            signInWithCustomToken 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            collection, 
+            doc, 
+            addDoc, 
+            getDoc, 
+            updateDoc, 
+            onSnapshot, 
+            serverTimestamp,
+            setLogLevel
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase & App Config ---
+
+        // Use global variables provided by the environment
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'kaaryasetu-demo';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId;
+        let reportsCollectionRef;
+        let unsubscribeReports = () => {}; // Function to stop the listener
+        let allReports = []; // To store reports for filtering
+        let currentFilter = 'all'; // To track the current filter
+        let chatHistory = []; // For the AI Chatbot
+
+        // --- Gemini API Config ---
+        // API key is provided by the environment, leave empty string.
+        const GEMINI_API_KEY = ""; 
+        const GEMINI_API_URL = https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY};
+
+        // --- UI Element References ---
+        const reportsFeed = document.getElementById('reports-feed');
+        const modal = document.getElementById('details-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalImage = document.getElementById('modal-image');
+        const modalDescription = document.getElementById('modal-description');
+        const modalLocation = document.getElementById('modal-location');
+        const modalDepartment = document.getElementById('modal-department');
+        const modalStatusSelect = document.getElementById('modal-status-select');
+        const modalSaveButton = document.getElementById('modal-save-button');
+        const modalCloseButton = document.getElementById('modal-close-button');
+        const modalActionPlanButton = document.getElementById('modal-action-plan-button');
+        const modalActionPlanResult = document.getElementById('modal-action-plan-result');
+        const createReportButton = document.getElementById('create-report-button');
+        const statsTotal = document.getElementById('stats-total');
+        const statsNew = document.getElementById('stats-new');
+        const statsResolved = document.getElementById('stats-resolved');
+        const filterButtons = document.querySelectorAll('.filter-button');
+        const chatWidgetButton = document.getElementById('chat-widget-button');
+        const chatModal = document.getElementById('chat-modal');
+        const chatCloseButton = document.getElementById('chat-close-button');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const chatSendButton = document.getElementById('chat-send-button');
+
+        // --- Styling & Helpers ---
+
+        const statusColors = {
+            'new': 'bg-blue-100 text-blue-800',
+            'processing': 'bg-gray-100 text-gray-800 animate-pulse',
+            'unassigned': 'bg-red-100 text-red-800',
+            'in-progress': 'bg-yellow-100 text-yellow-800',
+            'resolved': 'bg-green-100 text-green-800',
+            'duplicate': 'bg-purple-100 text-purple-800' // Added duplicate
+        };
+
+        const priorityColors = {
+            'High': 'bg-red-500 text-white',
+            'Medium': 'bg-yellow-500 text-white',
+            'Low': 'bg-green-500 text-white',
+            'N/A': 'bg-gray-400 text-white'
+        };
+
+        // Icons for categories
+        const categoryIcons = {
+            'Pothole': <svg class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 002-2v-1a2 2 0 012-2h1.945M3.055 11A9.001 9.001 0 0121.945 11M3.055 11A9.003 9.003 0 003 12c0 1.638.43 3.183 1.182 4.54M21.945 11A9.003 9.003 0 0121 12c0 1.638-.43 3.183-1.182 4.54M12 21a9.003 9.003 0 008.818-7.46M3.182 16.54A9.003 9.003 0 0012 21"></path></svg>,
+            'Streetlight Out': <svg class="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M12 21v-1m0-8a3 3 0 00-3 3h6a3 3 0 00-3-3z"></path></svg>,
+            'Overflowing Bin': <svg class="w-6 h-6 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>,
+            'Water Leakage': <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>,
+            'Broken Signage': <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6H8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path></svg>,
+            'Manual Review Needed': <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>,
+            'default': <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+        };
+
+        function getCategoryIcon(category) {
+            return categoryIcons[category] || categoryIcons['default'];
+        }
+
+        // --- Core Application Logic ---
+
+        /**
+         * Initialize the Firebase app and authentication
+         */
+        async function initFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); // Enable Firestore logging
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        console.log("User is authenticated:", user.uid);
+                        userId = user.uid;
+                        // User is signed in, initialize the app logic
+                        initializeAppLogic();
+                    } else {
+                        console.log("User is not authenticated. Signing in...");
+                        // No user, try to sign in
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (authError) {
+                            console.error("Error during sign-in:", authError);
+                            document.getElementById('app-body').innerHTML = <div class="p-4 bg-red-100 text-red-800 rounded-lg">Error connecting to authentication. Please refresh.</div>;
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+                document.getElementById('app-body').innerHTML = <div class="p-4 bg-red-100 text-red-800 rounded-lg">Error initializing application. Invalid configuration.</div>;
+            }
+        }
+
+        /**
+         * Set up listeners and initial state
+         */
+        function initializeAppLogic() {
+            // Use 'public/data' for collaborative data as per instructions
+            const collectionPath = /artifacts/${appId}/public/data/reports;
+            console.log(Listening to collection: ${collectionPath});
+            reportsCollectionRef = collection(db, collectionPath);
+
+            // Listen for real-time updates to the reports
+            unsubscribeReports = onSnapshot(reportsCollectionRef, (snapshot) => {
+                console.log(Received ${snapshot.docChanges().length} changes.);
+                let total = 0;
+                let newCount = 0;
+                let resolvedCount = 0;
+                
+                allReports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                // Sort reports by creation time (newest first)
+                allReports.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+                displayReports(); // Display based on current filter
+
+                // Update stats
+                allReports.forEach(report => {
+                    total++;
+                    if (['unassigned', 'new', 'processing'].includes(report.status)) newCount++;
+                    if (report.status === 'resolved') resolvedCount++;
+                });
+
+                statsTotal.textContent = total;
+                statsNew.textContent = newCount;
+                statsResolved.textContent = resolvedCount;
+
+                // Handle 'new' status for Gemini processing
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        const reportData = change.doc.data();
+                        // If it's a brand new report, call Gemini for analysis
+                        if (reportData.status === 'new') {
+                            callGeminiForAnalysis(change.doc.id, reportData.description);
+                        }
+                    }
+                });
+
+            }, (error) => {
+                console.error("Error listening to reports:", error);
+                reportsFeed.innerHTML = <li class="p-4 bg-red-100 text-red-800 rounded-lg">Error loading reports.</li>;
+            });
+
+            // Set up event listeners for UI
+            setupEventListeners();
+        }
+
+        /**
+         * ✨ Displays reports based on the current filter
+         */
+        function displayReports() {
+            reportsFeed.innerHTML = ''; // Clear the feed
+            
+            const filteredReports = allReports.filter(report => {
+                if (currentFilter === 'all') return true;
+                if (currentFilter === 'unassigned') return ['unassigned', 'new', 'processing'].includes(report.status);
+                if (currentFilter === 'in-progress') return report.status === 'in-progress';
+                return true;
+            });
+
+            if (filteredReports.length === 0) {
+                reportsFeed.innerHTML = <li class="text-center text-gray-500 p-10">No reports match the current filter.</li>;
+                return;
+            }
+
+            filteredReports.forEach(report => {
+                const reportCard = createReportCard(report.id, report);
+                reportsFeed.appendChild(reportCard);
+            });
+        }
+
+
+        /**
+         * Creates the HTML for a single report card
+         */
+        function createReportCard(id, data) {
+            const card = document.createElement('li');
+            card.id = report-${id};
+            card.className = "bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-l-4";
+            card.dataset.id = id;
+
+            // Set border color based on status
+            const status = data.status || 'new';
+            if (status === 'resolved') card.classList.add('border-green-500');
+            else if (status === 'in-progress') card.classList.add('border-yellow-500');
+            else if (status === 'unassigned' || status === 'new' || status === 'processing') card.classList.add('border-red-500');
+            else card.classList.add('border-gray-300');
+
+            const category = data.ai_category || (data.status === 'new' ? 'Analyzing...' : 'N/A');
+            const priority = data.ai_priority || 'N/A';
+            const location = data.location || 'Unknown location';
+            const department = data.ai_department || 'N/A';
+            const description = data.description || 'No description';
+            
+            let statusText = status.charAt(0).toUpperCase() + status.slice(1);
+            let statusColor = statusColors[status] || statusColors['new'];
+
+            if (status === 'new' || status === 'processing') {
+                statusText = '✨ Processing (AI)...';
+                statusColor = statusColors['processing'];
+            }
+ 
+            card.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center space-x-3">
+                        <span class="flex-shrink-0">${getCategoryIcon(category)}</span>
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">${category}</h3>
+                            <p class="text-sm text-gray-600">${location}</p>
+                            <p class="text-sm text-gray-500 italic">Dept: ${department}</p>
+                        </div>
+                    </div>
+                    <span class="text-xs font-medium px-2.5 py-0.5 rounded-full ${priorityColors[priority]} flex-shrink-0">${priority}</span>
+                </div>
+                <p class="text-sm text-gray-700 mt-2 truncate">${description}</p>
+                <div class="flex justify-between items-center mt-3">
+                    <span class="text-xs font-medium px-2.5 py-0.5 rounded ${statusColor}">${statusText}</span>
+                    <span class="text-xs text-gray-400">${data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : 'Just now'}</span>
+                </div>
+            `;
+            
+            // Add click listener to open modal
+            card.addEventListener('click', () => showDetailsModal(id));
+            
+            return card;
+        }
+
+        /**
+         * Generic function to call the Gemini API with exponential backoff.
+         * @param {object} payload The payload to send to the API.
+         * @returns {Promise<object>} The API response part.
+         */
+        async function callGeminiAPI(payload) {
+            let retries = 0;
+            const maxRetries = 3;
+            while (retries < maxRetries) {
+                try {
+                    const response = await fetch(GEMINI_API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        console.error(API Error Response: ${await response.text()});
+                        throw new Error(API request failed with status ${response.status});
+                    }
+
+                    const result = await response.json();
+                    
+                    if (result.candidates && result.candidates[0].content?.parts?.[0]?.text) {
+                        return result.candidates[0].content.parts[0];
+                    } else {
+                        console.error("Invalid response structure from Gemini:", result);
+                        if (result.promptFeedback) {
+                            console.error("Prompt Feedback:", result.promptFeedback);
+                        }
+                        throw new Error("Invalid response structure or blocked content.");
+                    }
+                } catch (error) {
+                    console.warn(Gemini API call failed (attempt ${retries + 1}):, error.message);
+                    retries++;
+                    if (retries === maxRetries) {
+                        throw new Error(Failed to call Gemini API after ${maxRetries} attempts.);
+                    }
+                    // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, retries) * 1000));
+                }
+            }
+            throw new Error("Gemini API call failed after all retries.");
+        }
+
+
+        /**
+         * ✨ Calls Gemini API to analyze new reports using JSON schema.
+         * Replaces the old simulateAIProcessing function.
+         */
+        async function callGeminiForAnalysis(id, description) {
+            console.log(✨ Calling Gemini API for analysis of ${id}...);
+            const docRef = doc(db, /artifacts/${appId}/public/data/reports, id);
+
+            // Update status to 'processing' so UI changes
+            try {
+                await updateDoc(docRef, { status: 'processing' });
+            } catch (e) {
+                console.error("Error setting status to processing:", e);
+                return; // Don't proceed if we can't update
+            }
+
+            const systemPrompt = `You are an AI assistant for a city government. Your job is to analyze a citizen's report and classify it.
+            Respond ONLY with a valid JSON object matching this schema.
+            Do not include \\\json or \\\. Just the raw JSON.`;
+
+            const userQuery = Analyze this citizen report: "${description}";
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "category": { "type": "STRING", "description": "e.g., Pothole, Streetlight Out, Overflowing Bin, Water Leakage, Broken Signage" },
+                            "priority": { "type": "STRING", "description": "High, Medium, or Low" },
+                            "suggested_department": { "type": "STRING", "description": "e.g., Public Works, Sanitation, Electrical, Water Dept." }
+                        },
+                        required: ["category", "priority", "suggested_department"]
+                    }
+                }
+            };
+
+            try {
+                const part = await callGeminiAPI(payload);
+                const jsonResult = JSON.parse(part.text);
+
+                // Update the doc with the AI's analysis
+                await updateDoc(docRef, {
+                    status: 'unassigned', // Now it's ready for a human
+                    ai_category: jsonResult.category || 'N/A',
+                    ai_priority: jsonResult.priority || 'N/A',
+                    ai_department: jsonResult.suggested_department || 'N/A'
+                });
+                console.log(✨ Gemini analysis complete for ${id}:, jsonResult);
+
+            } catch (e) {
+                console.error("Error during Gemini analysis:", e);
+                // If AI fails, set to unassigned so it can be manually reviewed
+                try {
+                    await updateDoc(docRef, {
+                        status: 'unassigned',
+                        ai_category: 'Manual Review Needed',
+                        ai_priority: 'N/A',
+                        ai_department: 'N/A'
+                    });
+                } catch (updateError) {
+                    console.error("Error setting manual review status:", updateError);
+                }
+            }
+        }
+
+        /**
+         * Fetches full report data and displays the modal
+         */
+        async function showDetailsModal(id) {
+            console.log(Opening modal for ${id});
+            try {
+                const docRef = doc(db, /artifacts/${appId}/public/data/reports, id);
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    modalTitle.textContent = data.ai_category || 'New Report';
+                    modalImage.src = data.imageUrl || 'https://placehold.co/600x400/e2e8f0/94a3b8?text=No+Image';
+                    modalDescription.textContent = data.description || 'No description provided.';
+                    modalLocation.textContent = data.location || 'No location provided.';
+                    modalDepartment.textContent = data.ai_department || 'N/A';
+                    
+                    // Set dropdown value
+                    modalStatusSelect.value = data.status || 'new';
+
+                    // Clear old action plan results
+                    modalActionPlanResult.innerHTML = '';
+                    modalActionPlanButton.disabled = false;
+                    
+                    // Store context for Gemini action plan
+                    modalActionPlanButton.dataset.id = id; // Store id for context
+                    modalActionPlanButton.dataset.description = data.description || '';
+                    modalActionPlanButton.dataset.category = data.ai_category || 'Uncategorized';
+
+                    // Store ID on save button for update
+                    modalSaveButton.dataset.id = id;
+                    
+                    modal.classList.remove('hidden');
+                } else {
+                    console.error("No such report found!");
+                }
+            } catch (e) {
+                console.error("Error fetching report details:", e);
+            }
+        }
+
+        /**
+         * Hides the details modal
+         */
+        function hideModal() {
+            modal.classList.add('hidden');
+        }
+
+        /**
+         * ✨ Calls Gemini to get a suggested action plan for an issue
+         */
+        async function getGeminiActionPlan() {
+            const description = modalActionPlanButton.dataset.description;
+            const category = modalActionPlanButton.dataset.category;
+
+            if (!description || !category) {
+                modalActionPlanResult.innerHTML = <p class="text-red-600">Error: Missing report data.</p>;
+                return;
+            }
+
+            modalActionPlanButton.disabled = true;
+            modalActionPlanResult.innerHTML = <p class="text-gray-600 animate-pulse">✨ Generating action plan...</p>;
+
+            const systemPrompt = "You are a helpful city operations manager. A citizen reported an issue. Provide a concise 3-step action plan for the assigned department. Format the response as an HTML ordered list (<ol><li>...</li></ol>).";
+            const userQuery = Issue Category: ${category}\nCitizen Report: "${description}";
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            try {
+                const part = await callGeminiAPI(payload);
+                // Simple text display, avoid innerHTML from LLM for safety
+                modalActionPlanResult.innerHTML = part.text;
+            } catch (e) {
+                console.error("Error getting action plan:", e);
+                modalActionPlanResult.innerHTML = <p class="text-red-600">Error: Could not generate action plan.</p>;
+                modalActionPlanButton.disabled = false; // Allow retry
+            }
+        }
+
+        /**
+         * ✨ Calls Gemini for the chatbot functionality
+         */
+        async function callGeminiChatbot() {
+            const userInput = chatInput.value.trim();
+            if (!userInput) return;
+
+            addChatMessage(userInput, 'user');
+            chatInput.value = '';
+            chatSendButton.disabled = true;
+
+            // Add loading indicator
+            const loadingMessage = addChatMessage('...', 'assistant', true);
+
+            // Construct payload with history
+            const systemPrompt = `You are a helpful AI assistant for a city's government operations team. Your name is "KaaryaSetu Assistant". 
+Answer the operator's questions concisely. You can help them understand procedures, draft communications, or summarize information.
+Be friendly and professional. You have access to the chat history.
+Today's summary (mock data): 5 new Potholes, 2 Streetlight issues. Priority is on Main St. Pothole.`;
+
+            const payload = {
+                contents: [
+                    ...chatHistory,
+                    { role: "user", parts: [{ text: userInput }] }
+                ],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            try {
+                const part = await callGeminiAPI(payload);
+                const botResponse = part.text;
+
+                // Update loading message with real response
+                loadingMessage.innerHTML = botResponse;
+                loadingMessage.classList.remove('animate-pulse');
+
+                // Update history
+                chatHistory.push({ role: "user", parts: [{ text: userInput }] });
+                chatHistory.push({ role: "model", parts: [{ text: botResponse }] });
+
+            } catch (e) {
+                console.error("Error calling chatbot API:", e);
+                loadingMessage.innerHTML = 'Sorry, I encountered an error. Please try again.';
+                loadingMessage.classList.add('text-red-500');
+            } finally {
+                chatSendButton.disabled = false;
+                chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
+            }
+        }
+
+        /**
+         * ✨ Adds a message to the chat window
+         */
+        function addChatMessage(text, sender, isLoading = false) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('p-3', 'rounded-lg', 'max-w-xs');
+            
+            if (sender === 'user') {
+                messageElement.classList.add('bg-indigo-500', 'text-white', 'self-end', 'ml-auto');
+            } else {
+                messageElement.classList.add('bg-gray-200', 'text-gray-800', 'self-start', 'mr-auto');
+                if (isLoading) {
+                    messageElement.classList.add('animate-pulse');
+                }
+            }
+            
+            messageElement.innerHTML = text; // Using innerHTML to render lists from AI
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
+            return messageElement;
+        }
+
+        /**
+         * Sets up all application event listeners
+         */
+        function setupEventListeners() {
+            // Modal close button
+            modalCloseButton.addEventListener('click', hideModal);
+
+            // Modal save button
+            modalSaveButton.addEventListener('click', async () => {
+                const id = modalSaveButton.dataset.id;
+                const newStatus = modalStatusSelect.value;
+                
+                if (!id) return;
+
+                console.log(Updating status for ${id} to ${newStatus});
+                modalSaveButton.disabled = true;
+                modalSaveButton.textContent = 'Saving...';
+
+                try {
+                    const docRef = doc(db, /artifacts/${appId}/public/data/reports, id);
+                    await updateDoc(docRef, {
+                        status: newStatus
+                    });
+                    hideModal();
+                } catch (e) {
+                    console.error("Error updating status:", e);
+                } finally {
+                    modalSaveButton.disabled = false;
+                    modalSaveButton.textContent = 'Save Changes';
+                }
+            });
+
+            // Button to create a new mock report (to simulate a citizen's app)
+            createReportButton.addEventListener('click', async () => {
+                console.log("Creating mock report...");
+                createReportButton.disabled = true;
+                
+                try {
+                    // Mock data for a new report
+                    const mockDescriptions = [
+                        'Huge pothole on Main St, very dangerous.',
+                        'Streetlight at corner of 5th and Elm is out.',
+                        'Garbage bin near the park is overflowing, smells terrible.',
+                        'Water pipe broken and leaking all over the sidewalk.'
+                    ];
+                    const mockLocations = [
+                        '123 Main St, City Center',
+                        'Corner of 5th Ave and Elm St',
+                        'City Park Entrance, Oak St',
+                        '456 Maple Dr, Suburbia'
+                    ];
+                    
+                    const randIndex = Math.floor(Math.random() * mockDescriptions.length);
+                    
+                    await addDoc(reportsCollectionRef, {
+                        description: mockDescriptions[randIndex],
+                        location: mockLocations[randIndex],
+                        imageUrl: 'https://placehold.co/600x400/e2e8f0/94a3b8?text=Citizen+Photo',
+                        status: 'new', // 'new' status triggers the AI simulation
+                        createdAt: serverTimestamp(),
+                        citizenId: citizen-${Math.floor(Math.random() * 1000)}
+                    });
+
+                } catch (e) {
+                    console.error("Error creating mock report:", e);
+                } finally {
+                    createReportButton.disabled = false;
+                }
+            });
+
+            // ✨ New Gemini Action Plan button
+            modalActionPlanButton.addEventListener('click', getGeminiActionPlan);
+
+            // ✨ Filter button listeners
+            filterButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    // Remove active class from all
+                    filterButtons.forEach(btn => btn.classList.replace('bg-indigo-600', 'bg-gray-200'));
+                    filterButtons.forEach(btn => btn.classList.replace('text-white', 'text-gray-700'));
+                    
+                    // Add active class to clicked
+                    button.classList.replace('bg-gray-200', 'bg-indigo-600');
+                    button.classList.replace('text-gray-700', 'text-white');
+                    
+                    currentFilter = button.dataset.filter;
+                    displayReports();
+                });
+            });
+
+            // ✨ Chatbot UI listeners
+            chatWidgetButton.addEventListener('click', () => {
+                chatModal.classList.remove('hidden');
+                chatInput.focus();
+                if (chatHistory.length === 0) {
+                   addChatMessage('Hello! How can I assist you today?', 'assistant');
+                }
+            });
+
+            chatCloseButton.addEventListener('click', () => {
+                chatModal.classList.add('hidden');
+            });
+
+            chatSendButton.addEventListener('click', callGeminiChatbot);
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    callGeminiChatbot();
+                }
+            });
+        }
+
+        // --- Start the App ---
+        initFirebase();
+    </script>
+    
+    <!-- 4. Custom Styles -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar */
+        #reports-feed, #chat-messages {
+            scrollbar-width: thin;
+            scrollbar-color: #94a3b8 #e2e8f0;
+        }
+        #reports-feed::-webkit-scrollbar,
+        #chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+        #reports-feed::-webkit-scrollbar-track,
+        #chat-messages::-webkit-scrollbar-track {
+            background: #e2e8f0;
+            border-radius: 4px;
+        }
+        #reports-feed::-webkit-scrollbar-thumb,
+        #chat-messages::-webkit-scrollbar-thumb {
+            background-color: #94a3b8;
+            border-radius: 4px;
+            border: 2px solid #e2e8f0;
+        }
+
+        /* Added for chat modal transitions */
+        #chat-modal {
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100" id="app-body">
+    <div class="flex h-screen">
+        <!-- Sidebar Navigation -->
+        <nav class="w-64 bg-gray-900 text-white flex flex-col">
+            <div class="flex items-center justify-center h-20 border-b border-gray-700">
+                <!-- SVG Logo for KaaryaSetu -->
+                <svg class="w-8 h-8 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                <span class="text-2xl font-bold">KaaryaSetu</span>
+            </div>
+            <ul class="flex-1 py-4">
+                <li class="px-6 py-3">
+                    <a href="#" class="flex items-center text-lg font-medium bg-gray-800 text-white rounded-lg px-4 py-2">
+                        <!-- Dashboard Icon -->
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6-4h.01M12 12h.01M15 15h.01M12 15h.01M9 15h.01M12 9h.01M15 9h.01M9 9h.01"></path></svg>
+                        Dashboard
+                    </a>
+                </li>
+                <li class="px-6 py-3">
+                    <a href="#" class="flex items-center text-lg text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg px-4 py-2 transition-colors">
+                        <!-- Reports Icon -->
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        All Reports
+                    </a>
+                </li>
+                <li class="px-6 py-3">
+                    <a href="#" class="flex items-center text-lg text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg px-4 py-2 transition-colors">
+                        <!-- Map Icon -->
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Live Map
+                    </a>
+                </li>
+                <li class="px-6 py-3">
+                    <a href="#" class="flex items-center text-lg text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg px-4 py-2 transition-colors">
+                        <!-- Users Icon -->
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                        Departments
+                    </a>
+                </li>
+            </ul>
+            <div class="p-6 border-t border-gray-700">
+                <a href="#" class="flex items-center text-lg text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg px-4 py-2 transition-colors">
+                    <!-- Settings Icon -->
+                    <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Settings
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 flex flex-col h-screen overflow-hidden">
+            <!-- Header -->
+            <header class="flex justify-between items-center p-6 bg-white border-b border-gray-200">
+                <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
+                <div class="flex items-center space-x-4">
+                    <button id="create-report-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center shadow-sm disabled:opacity-50">
+                        <!-- Plus Icon -->
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                        Simulate New Report
+                    </button>
+                    <div class="h-10 w-10 rounded-full bg-gray-300 overflow-hidden">
+                        <img src="https://placehold.co/100x100/e2e8f0/94a3b8?text=Op" alt="User Avatar" class="object-cover">
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main grid -->
+            <div class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-y-auto">
+                
+                <!-- Column 1: Live Reports Feed -->
+                <div class="lg:col-span-2 flex flex-col h-full">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-semibold text-gray-800">Live Reports Feed</h2>
+                        <!-- ✨ Filter Buttons -->
+                        <div class="flex space-x-2">
+                            <button data-filter="all" class="filter-button bg-indigo-600 text-white px-4 py-1.5 rounded-full text-sm font-medium transition-colors">All</button>
+                            <button data-filter="unassigned" class="filter-button bg-gray-200 text-gray-700 px-4 py-1.5 rounded-full text-sm font-medium transition-colors">Unassigned</button>
+                            <button data-filter="in-progress" class="filter-button bg-gray-200 text-gray-700 px-4 py-1.5 rounded-full text-sm font-medium transition-colors">In Progress</button>
+                        </div>
+                    </div>
+                    <ul id="reports-feed" class="space-y-4 overflow-y-auto flex-1 pb-6 bg-white p-4 rounded-lg border border-gray-200">
+                        <!-- Report cards will be injected here by JavaScript -->
+                        <li id="loading-placeholder" class="text-center text-gray-500 p-10">
+                            Connecting to live feed...
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Column 2: Stats & Map -->
+                <div class="lg:col-span-1 space-y-6">
+                    <!-- Stats Cards -->
+                    <div>
+                        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Overview</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
+                            <div class="bg-white p-6 rounded-lg shadow-sm flex items-center space-x-4">
+                                <div class="p-3 rounded-full bg-blue-100 text-blue-600">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-medium text-gray-500">Total Reports</h3>
+                                    <p id="stats-total" class="text-3xl font-semibold text-gray-900">0</p>
+                                </div>
+                            </div>
+                            <div class="bg-white p-6 rounded-lg shadow-sm flex items-center space-x-4">
+                                <div class="p-3 rounded-full bg-red-100 text-red-600">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341A6.002 6.002 0 006 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-medium text-gray-500">New / Unassigned</h3>
+                                    <p id="stats-new" class="text-3xl font-semibold text-gray-900">0</p>
+                                </div>
+                            </div>
+                            <div class="bg-white p-6 rounded-lg shadow-sm flex items-center space-x-4">
+                                <div class="p-3 rounded-full bg-green-100 text-green-600">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-medium text-gray-500">Resolved Today</h3>
+                                    <p id="stats-resolved" class="text-3xl font-semibold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Map Placeholder -->
+                    <div>
+                        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Problem Hotspots</h2>
+                        <div class="bg-white rounded-lg shadow-sm overflow-hidden relative">
+                            <img src="https://placehold.co/600x400/e2e8f0/94a3b8?text=Live+Map+View" alt="Map placeholder" class="w-full h-auto object-cover">
+                            <div class="absolute top-4 left-4 bg-white/80 p-2 rounded-lg shadow backdrop-blur-sm">
+                                <h4 class="font-semibold text-gray-800">Map Legend</h4>
+                                <ul class="text-sm">
+                                    <li class="flex items-center"><span class="w-3 h-3 rounded-full bg-red-500 mr-2"></span> High Priority</li>
+                                    <li class="flex items-center"><span class="w-3 h-3 rounded-full bg-yellow-500 mr-2"></span> Medium Priority</li>
+                                    <li class="flex items-center"><span class="w-3 h-3 rounded-full bg-blue-500 mr-2"></span> Low Priority</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">Live map view will show report clusters. (This is a placeholder for your Google Maps/Mapbox integration).</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Details Modal -->
+    <div id="details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 hidden z-50 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden my-8">
+            <div class="flex justify-between items-center p-4 border-b">
+                <h3 id="modal-title" class="text-xl font-semibold">Report Details</h3>
+                <button id="modal-close-button" class_alias="p-1 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                    <!-- Close Icon -->
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                <img id="modal-image" src="https://placehold.co/600x400/e2e8f0/94a3b8?text=Report+Image" alt="Report Image" class="w-full rounded-lg object-cover h-64">
+                
+                <dl class="divide-y divide-gray-200">
+                    <div class="py-3 grid grid-cols-3 gap-4">
+                        <dt class="text-sm font-medium text-gray-500">Location</dt>
+                        <dd id="modal-location" class="text-sm text-gray-900 col-span-2">No location provided.</dd>
+                    </div>
+                    <div class="py-3 grid grid-cols-3 gap-4">
+                        <dt class="text-sm font-medium text-gray-500">Assigned Dept.</dt>
+                        <dd id="modal-department" class="text-sm text-gray-900 col-span-2">N/A</dd>
+                    </div>
+                    <div class="py-3 grid grid-cols-3 gap-4">
+                        <dt class="text-sm font-medium text-gray-500">Description</dt>
+                        <dd id="modal-description" class="text-sm text-gray-900 col-span-2">No description provided.</dd>
+                    </div>
+                </dl>
+
+                <!-- ✨ GEMINI ACTION PLAN FEATURE -->
+                <div>
+                    <h4 class="font-medium text-gray-800">✨ AI Suggested Action Plan</h4>
+                    <button id="modal-action-plan-button" class="mt-1 w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors">
+                        <!-- Sparkle icon -->
+                        <svg class="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg>
+                        Generate Action Plan
+                    </button>
+                    <div id="modal-action-plan-result" class="mt-2 text-sm text-gray-700 bg-gray-50 p-3 rounded-lg min-h-[60px] prose prose-sm">
+                        <!-- Gemini results will appear here -->
+                    </div>
+                </div>
+                <!-- END GEMINI FEATURE -->
+
+                <div>
+                    <label for="modal-status-select" class="block text-sm font-medium text-gray-700 mb-1">Update Status</label>
+                    <select id="modal-status-select" class="w-full p-2 border border-gray-300 rounded-lg bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="unassigned">Unassigned</option>
+                        <option value="in-progress">In Progress</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="duplicate">Duplicate</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex justify-end p-4 bg-gray-50 border-t">
+                <button id="modal-save-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">
+                    Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✨ AI Chatbot Widget -->
+    <div id="chat-modal" class="fixed bottom-24 right-6 w-96 bg-white rounded-lg shadow-2xl border border-gray-200 hidden z-50 flex-col h-[60vh]">
+        <div class="flex justify-between items-center p-4 border-b bg-gray-50 rounded-t-lg">
+            <h3 class="text-lg font-semibold text-gray-800">KaaryaSetu AI Assistant</h3>
+            <button id="chat-close-button" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div id="chat-messages" class="flex-1 p-4 space-y-3 overflow-y-auto flex flex-col">
+            <!-- Chat messages will be injected here -->
+        </div>
+        <div class="p-4 border-t bg-white rounded-b-lg">
+            <div class="flex space-x-2">
+                <input type="text" id="chat-input" placeholder="Ask a question..." class="flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button id="chat-send-button" class="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <button id="chat-widget-button" class="fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-110 z-40">
+        <svg class="w-8 h-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg>
+    </button>
+    <!-- End AI Chatbot Widget -->
+
+</body>
+</html>
